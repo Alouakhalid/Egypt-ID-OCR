@@ -6,7 +6,7 @@ import json
 import sqlite3
 import datetime
 import io
-from PIL import Image
+from PIL import Image, ImageOps
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -134,13 +134,14 @@ st.markdown("""
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "qwen/qwen3.6-27b"
 
-def resize_image(image_bytes, max_size=512):
+def resize_image(image_bytes, max_size=1024):
     try:
         img = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(img)
         if img.mode != 'RGB': img = img.convert('RGB')
         img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
         output = io.BytesIO()
-        img.save(output, format="JPEG", quality=60)
+        img.save(output, format="JPEG", quality=85)
         return output.getvalue()
     except Exception:
         return image_bytes
