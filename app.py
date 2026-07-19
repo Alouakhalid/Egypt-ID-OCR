@@ -159,6 +159,9 @@ def extract_id_data(front_image_bytes, back_image_bytes=None):
     content = []
     prompt = (
         "Egyptian National ID card (Front and Back). Extract in Arabic RTL order. "
+        "CRITICAL FOR NAME (الاسم): The name spans multiple lines. The top line is the First Name. "
+        "The bottom line is the rest of the name. You MUST read the top line FIRST, then the bottom line RTL. "
+        "Example: If top line is 'علي' and bottom line is 'خالد علي خالد', the name is 'علي خالد علي خالد'. "
         "Do NOT overthink. Output ONE JSON object immediately with keys: "
         "الاسم, العنوان, الرقم القومي, المحافظة, الديانة, الحالة الاجتماعية, "
         "المهنة, النوع (ذكر or أنثى), تاريخ الاصدار, سارية حتى. "
