@@ -134,13 +134,13 @@ st.markdown("""
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "qwen/qwen3.6-27b"
 
-def resize_image(image_bytes, max_size=1024):
+def resize_image(image_bytes, max_size=512):
     try:
         img = Image.open(io.BytesIO(image_bytes))
         if img.mode != 'RGB': img = img.convert('RGB')
         img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
         output = io.BytesIO()
-        img.save(output, format="JPEG", quality=85)
+        img.save(output, format="JPEG", quality=60)
         return output.getvalue()
     except Exception:
         return image_bytes
@@ -150,71 +150,68 @@ def bytes_to_data_url(image_bytes, mime_type="image/jpeg"):
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     return f"data:{mime_type};base64,{b64}"
 
+def call_groq(api_key, prompt, image_bytes):
+    content = [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": bytes_to_data_url(image_bytes), "detail": "low"}}
+    ]
+    payload = {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": content}],
+        "temperature": 0.2,
+        "max_tokens": 2000
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    resp = requests.post(GROQ_API_URL, json=payload, headers=headers, timeout=60)
+    resp.raise_for_status()
+    raw_text = resp.json()["choices"][0]["message"]["content"]
+    import re
+    json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    if json_match:
+        return json.loads(json_match.group(0))
+    if "<think>" in raw_text and "</think>" in raw_text:
+        raw_text = raw_text.split("</think>")[-1].strip()
+    if raw_text.startswith("```json"): raw_text = raw_text[7:]
+    if raw_text.startswith("```"): raw_text = raw_text[3:]
+    if raw_text.endswith("```"): raw_text = raw_text[:-3]
+    return json.loads(raw_text.strip())
+
 def extract_id_data(front_image_bytes, back_image_bytes=None):
     api_key = get_api_key()
     if not api_key:
         return {"error": "API Key missing. Please configure it in the Admin Dashboard."}
 
-    content = []
-    prompt = (
-        "This is an image of an Egyptian National ID card (Front and optionally Back). "
-        "Extract all the visible information from the ID card with extreme accuracy. "
-        "CRITICAL INSTRUCTION FOR ARABIC: Arabic text is read from RIGHT to LEFT. You must extract names and words in the exact correct Right-to-Left order as they appear on the card (e.g., First Name, then Father's Name, etc). DO NOT reverse the word order. "
-        "CRITICAL ANTI-LOOP RULE: Do NOT overthink. Do NOT repeatedly double-check the text. Think very briefly and immediately output the JSON."
-        "Respond ONLY with a valid JSON object containing the following keys in Arabic: "
-        "- Name (الاسم) "
-        "- Address (العنوان) "
-        "- ID_Number (الرقم القومي) "
-        "- Governorate (المحافظة) "
-        "- Religion (الديانة) "
-        "- Marital_Status (الحالة الاجتماعية) "
-        "- Profession (المهنة) "
-        "- Gender (النوع) - Must be 'ذكر' or 'أنثى' "
-        "- Issue_Date (تاريخ الاصدار) "
-        "- Expiry_Date (سارية حتى) "
-        "- Spouse_Name - IMPORTANT RULE: If the gender is Male (ذكر), use the key 'اسم الزوجة' (Wife's Name). "
-        "If the gender is Female (أنثى), use the key 'اسم الزوج' (Husband's Name). "
-        "Read all characters carefully, especially the 14-digit national ID number. "
-        "If a field is not visible, set its value to null. "
-        "Do not include any explanation or think blocks, just the pure JSON string."
+    front_prompt = (
+        "Egyptian National ID card front. Extract in Arabic RTL order. "
+        "Do NOT overthink or loop. Output JSON immediately with keys: "
+        "الاسم, العنوان, الرقم القومي (14 digits), المحافظة. "
+        "Null if not visible. JSON only, no explanation."
     )
-    
-    content.append({"type": "text", "text": prompt})
-    
-    if front_image_bytes:
-        content.append({"type": "image_url", "image_url": {"url": bytes_to_data_url(front_image_bytes), "detail": "high"}})
-    if back_image_bytes:
-        content.append({"type": "image_url", "image_url": {"url": bytes_to_data_url(back_image_bytes), "detail": "high"}})
 
-    payload = {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": content}],
-        "temperature": 0.2,
-        "max_tokens": 4000
-    }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    back_prompt = (
+        "Egyptian National ID card back. Extract in Arabic. "
+        "Do NOT overthink or loop. Output JSON immediately with keys: "
+        "الديانة, الحالة الاجتماعية, المهنة, النوع (ذكر or أنثى), "
+        "تاريخ الاصدار, سارية حتى. "
+        "If النوع is ذكر add key اسم الزوجة, if أنثى add key اسم الزوج. "
+        "Null if not visible. JSON only, no explanation."
+    )
 
     try:
-        resp = requests.post(GROQ_API_URL, json=payload, headers=headers, timeout=60)
-        resp.raise_for_status()
-        raw_text = resp.json()["choices"][0]["message"]["content"]
-        
-        import re
-        json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-        if json_match:
-            raw_text = json_match.group(0)
-        else:
-            if "<think>" in raw_text and "</think>" in raw_text:
-                raw_text = raw_text.split("</think>")[-1].strip()
-            if raw_text.startswith("```json"): raw_text = raw_text[7:]
-            if raw_text.startswith("```"): raw_text = raw_text[3:]
-            if raw_text.endswith("```"): raw_text = raw_text[:-3]
-            
-        result = json.loads(raw_text.strip())
+        result = {}
+        front_result = call_groq(api_key, front_prompt, front_image_bytes)
+        result.update(front_result)
+
+        if back_image_bytes:
+            import time
+            time.sleep(2)
+            back_result = call_groq(api_key, back_prompt, back_image_bytes)
+            result.update(back_result)
+
         log_attempt("Success", result.get("الاسم"), result.get("الرقم القومي"))
         return result
     except Exception as e:
-        err_detail = resp.text if 'resp' in locals() else str(e)
+        err_detail = str(e)
         log_attempt("Failed", details=err_detail)
         return {"error": str(e), "details": err_detail}
 
