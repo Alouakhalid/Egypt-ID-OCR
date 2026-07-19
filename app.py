@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def get_api_key():
+    try:
+        return st.secrets["GROQ_API_KEY"]
+    except Exception:
+        return os.environ.get("GROQ_API_KEY", "")
+
 def init_db():
     conn = sqlite3.connect('logs.db')
     c = conn.cursor()
@@ -145,7 +151,7 @@ def bytes_to_data_url(image_bytes, mime_type="image/jpeg"):
     return f"data:{mime_type};base64,{b64}"
 
 def extract_id_data(front_image_bytes, back_image_bytes=None):
-    api_key = os.environ.get("GROQ_API_KEY")
+    api_key = get_api_key()
     if not api_key:
         return {"error": "API Key missing. Please configure it in the Admin Dashboard."}
 
