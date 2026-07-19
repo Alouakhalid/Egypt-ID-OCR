@@ -190,14 +190,17 @@ def extract_id_data(front_image_bytes, back_image_bytes=None):
             raise Exception(f"API Error {resp.status_code}: {resp.text}")
             
         raw_text = resp.json()["choices"][0]["message"]["content"]
+        
         import re
+        # 1. Remove <think>...</think> block completely first
+        raw_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
+        
+        # 2. Extract JSON
         json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
         
         if json_match:
             raw_text = json_match.group(0)
         else:
-            if "<think>" in raw_text and "</think>" in raw_text:
-                raw_text = raw_text.split("</think>")[-1].strip()
             if raw_text.startswith("```json"): raw_text = raw_text[7:]
             if raw_text.startswith("```"): raw_text = raw_text[3:]
             if raw_text.endswith("```"): raw_text = raw_text[:-3]
