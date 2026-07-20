@@ -2,3 +2,9 @@
 logs.db
 __pycache__/
 *.pyc
+
+# Ignore ID images
+*.jpeg
+*.jpg
+*.png
+*.webp
